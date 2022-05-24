@@ -17,6 +17,7 @@ swc_ecma_preset_env= { git = "https://github.com/swc-project/swc" }
 swc_ecma_transforms= { git = "https://github.com/swc-project/swc" }
 swc_ecma_visit= { git = "https://github.com/swc-project/swc" }
 swc_visit= { git = "https://github.com/swc-project/swc" }
+clap = { version = "3.1.18", features = ["derive"] }
 
 [dependencies.swc_common]
 git = "https://github.com/swc-project/swc"

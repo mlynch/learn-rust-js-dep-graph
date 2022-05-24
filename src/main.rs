@@ -1,16 +1,19 @@
 #![allow(dead_code)]
 extern crate swc_common;
 extern crate swc_ecma_parser;
-use std::path::Path;
+use std::fs::canonicalize;
+use std::path::{Path, PathBuf};
 use swc_common::sync::Lrc;
 use swc_common::{
     errors::{ColorConfig, Handler},
     /*FileName, FilePathMapping,*/ SourceMap,
 };
-use swc_ecma_ast::{ImportDecl, Module, ModuleDecl, Program};
-use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
+use swc_ecma_ast::{ImportDecl, Module, ModuleDecl, Program, TsCallSignatureDecl};
+use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsConfig};
 
 use std::collections::HashMap;
+
+mod cli;
 
 struct Graph {
     map: HashMap<String, Vec<String>>,
@@ -103,6 +106,80 @@ fn visit_import_decl(file_name: &str, import_decl: Option<&ImportDecl>, graph: &
 
     let val = &decl.src.value;
 
+    println!("Visiting import {} {}", file_name, val);
+
+    let dir_name = Path::new(file_name).parent().unwrap();
+
+    if Path::exists(&Path::new(&dir_name).join(val.to_string())) {
+        // This isn't perfect but assume the index file is tsx
+        println!("local ref exists {}", val);
+        let dir_path = &Path::new(&dir_name).join(val.to_string());
+        let mut index_path = dir_path.join("index.tsx");
+
+        if !Path::exists(index_path.as_path()) {
+            index_path = dir_path.join("index.ts");
+        }
+        if !Path::exists(index_path.as_path()) {
+            index_path = dir_path.join("index.js");
+        }
+        if !Path::exists(index_path.as_path()) {
+            index_path = dir_path.join("index.jsx");
+        }
+
+        if !Path::exists(index_path.as_path()) {
+            return;
+        }
+
+        println!("index path {:?}", index_path.to_str());
+        graph.push_local_dep(String::from(index_path.to_str().unwrap()), val.to_string().clone());
+        parse_file(&index_path.to_str().unwrap(), graph);
+    }
+
+    if Path::exists(&Path::new(&dir_name).join("..").join(val.to_string())) {
+        // This isn't perfect but assume the index file is tsx
+        println!("local ref dir in root exists {}", val);
+        let dir_path = &Path::new(&dir_name).join("..").join(val.to_string());
+        let mut index_path = dir_path.join("index.tsx");
+
+        if !Path::exists(index_path.as_path()) {
+            index_path = dir_path.join("index.ts");
+        }
+        if !Path::exists(index_path.as_path()) {
+            index_path = dir_path.join("index.js");
+        }
+        if !Path::exists(index_path.as_path()) {
+            index_path = dir_path.join("index.jsx");
+        }
+        if !Path::exists(index_path.as_path()) {
+            return;
+        }
+
+        println!("index path {:?}", index_path.to_str());
+        graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(&index_path.to_str().unwrap(), graph);
+    }
+
+    let js_path = &Path::new(&dir_name).join("..").join(format!("{}.js", val.to_string()));
+    if Path::exists(js_path) {
+        println!("local ref file js in root exists {}", val);
+        graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(js_path.to_str().unwrap(), graph);
+    }
+
+    let ts_path = &Path::new(&dir_name).join("..").join(format!("{}.ts", val.to_string()));
+    if Path::exists(ts_path) {
+        println!("local ref file ts in root exists {}", val);
+        graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(ts_path.to_str().unwrap(), graph);
+    }
+
+    let tsx_path = &Path::new(&dir_name).join("..").join(format!("{}.tsx", val.to_string()));
+    if Path::exists(tsx_path) {
+        println!("local ref file tsx in root exists {}", val);
+        graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(tsx_path.to_str().unwrap(), graph);
+    }
+
     if val.chars().next().unwrap() == '.' && val.contains(".js") {
         graph.push_local_dep(String::from(file_name), val.to_string().clone());
         parse_file(val, graph);
@@ -128,21 +205,31 @@ fn visit_stmt(stmt: Option<&Stmt>) {
 
 fn parse_file(file_name: &str, graph: &mut Graph) {
     if graph.seen(file_name.to_string()) {
+        println!("ALREADY SEEN {}", file_name);
         return
     }
-    println!("PARSE FILE {}", file_name);
 
     let cm: Lrc<SourceMap> = Default::default();
     let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
 
+    let pb = PathBuf::from(file_name);
+    let full_path = canonicalize(pb).expect("Unable to convert path");
+
+    println!("PARSE FILE {} {}", file_name, full_path.to_str().unwrap());
+
     // Real usage
     let fm = cm
-        .load_file(Path::new(&format!("app/{}", file_name)))
-        .expect("failed to load index.js");
+        //.load_file(Path::new(&format!("app/{}", file_name)))
+        .load_file(full_path.as_path())
+        .expect(&format!("failed to load {}", file_name));
 
     let lexer = Lexer::new(
         // We want to parse ecmascript
-        Syntax::Es(Default::default()),
+        //Syntax::Es(Default::default()),
+        Syntax::Typescript(TsConfig {
+            tsx: true,
+            ..Default::default()
+        }),
         // EsVersion defaults to es5
         Default::default(),
         StringInput::from(&*fm),
@@ -170,11 +257,13 @@ fn print_graph(graph: &Graph) {
 }
 
 fn main() {
+    let args = cli::get_args();
+
     let mut graph = Graph::new();
 
-    println!("Building dependency graph...");
+    println!("Building dependency graph, starting at {}...", args.entry);
 
-    parse_file("index.js", &mut graph);
+    parse_file(args.entry.as_str(), &mut graph);
 
     print_graph(&graph);
 }
