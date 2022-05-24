@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-#[macro_use]
 extern crate swc_common;
 extern crate swc_ecma_parser;
 use std::path::Path;
@@ -8,7 +7,7 @@ use swc_common::{
     errors::{ColorConfig, Handler},
     /*FileName, FilePathMapping,*/ SourceMap,
 };
-use swc_ecma_ast::{Decl, ExportDecl, ImportDecl, Module, ModuleDecl, Program, Stmt};
+use swc_ecma_ast::{ImportDecl, Module, ModuleDecl, Program};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax};
 
 use std::collections::HashMap;
@@ -22,6 +21,10 @@ impl Graph {
         Graph {
             map: HashMap::new(),
         }
+    }
+
+    fn seen(&self, file_name: String) -> bool {
+        self.map.contains_key(&file_name)
     }
 
     fn push_local_dep(&mut self, file_name: String, dep: String) {
@@ -51,10 +54,9 @@ fn parse(
     handler: Handler,
     graph: &mut Graph,
 ) {
-    println!("Parsing {}", file_name);
     let program = parser
         .parse_program()
-        .map_err(|mut e| {
+        .map_err(|e| {
             // Unrecoverable fatal error occurred
             e.into_diagnostic(&handler).emit()
         })
@@ -65,7 +67,6 @@ fn parse(
 
 fn process_program(file_name: &str, program: &Program, graph: &mut Graph) {
     if program.is_module() {
-        println!("Got a module");
         process_module(file_name, program.as_module(), graph);
     }
 }
@@ -74,9 +75,11 @@ fn process_module(file_name: &str, module: Option<&Module>, graph: &mut Graph) {
     let body = &module.expect("Unable to unwrap").body;
 
     for item in body {
+        /*
         if item.is_stmt() {
             visit_stmt(item.as_stmt());
         }
+        */
         if item.is_module_decl() {
             visit_module_decl(file_name, item.as_module_decl(), graph);
         }
@@ -87,15 +90,10 @@ fn visit_module_decl(file_name: &str, module_decl: Option<&ModuleDecl>, graph: &
     let decl = module_decl.expect("Unable to unwrap module decl");
 
     match decl {
-        ModuleDecl::Import(ImportDecl) => {
-            println!("Import decl");
+        ModuleDecl::Import(_import_decl) => {
             visit_import_decl(file_name, decl.as_import(), graph);
         }
-        ModuleDecl::ExportDecl(ExportDecl) => {
-            println!("Export decl");
-        }
         _ => {
-            println!("Other decl");
         }
     }
 }
@@ -103,23 +101,17 @@ fn visit_module_decl(file_name: &str, module_decl: Option<&ModuleDecl>, graph: &
 fn visit_import_decl(file_name: &str, import_decl: Option<&ImportDecl>, graph: &mut Graph) {
     let decl = import_decl.expect("Unable to unwrap import decl");
 
-    println!("Import {}", decl.src.value);
-
     let val = &decl.src.value;
 
     if val.chars().next().unwrap() == '.' && val.contains(".js") {
         graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(val, graph);
     } else {
         graph.push_library_dep(String::from(file_name), val.to_string().clone());
     }
-
-    /*
-    for s in decl.specifiers {
-
-    }
-    */
 }
 
+/*
 fn visit_stmt(stmt: Option<&Stmt>) {
     let statement = stmt.expect("Unable to unwrap statement");
 
@@ -132,14 +124,20 @@ fn visit_stmt(stmt: Option<&Stmt>) {
         }
     }
 }
+*/
 
 fn parse_file(file_name: &str, graph: &mut Graph) {
+    if graph.seen(file_name.to_string()) {
+        return
+    }
+    println!("PARSE FILE {}", file_name);
+
     let cm: Lrc<SourceMap> = Default::default();
     let handler = Handler::with_tty_emitter(ColorConfig::Auto, true, false, Some(cm.clone()));
 
     // Real usage
     let fm = cm
-        .load_file(Path::new("app/index.js"))
+        .load_file(Path::new(&format!("app/{}", file_name)))
         .expect("failed to load index.js");
 
     let lexer = Lexer::new(
@@ -161,8 +159,6 @@ fn parse_file(file_name: &str, graph: &mut Graph) {
 }
 
 fn print_graph(graph: &Graph) {
-    println!("Graph has {} items", graph.map.len());
-
     for file in graph.map.keys() {
         if let Some(deps) = graph.map.get(file) {
             println!("{}: {}", file, deps.len());
