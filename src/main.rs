@@ -270,7 +270,7 @@ fn main() {
 
     let mut graph = Graph::new();
 
-    let root_dir = Path::new(args.entry.as_str()).parent().unwrap();
+    let root_dir = Path::new(args.entry.as_str()).parent().unwrap().parent().unwrap();
 
     let mut ctx = Context {
         entry_file: args.entry.as_str(),
