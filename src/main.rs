@@ -11,45 +11,10 @@ use swc_common::{
 use swc_ecma_ast::{ImportDecl, Module, ModuleDecl, Program, TsCallSignatureDecl};
 use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, TsConfig};
 
-use std::collections::HashMap;
+use crate::graph::Graph;
 
 mod cli;
-
-struct Graph {
-    map: HashMap<String, Vec<String>>,
-}
-
-impl Graph {
-    fn new() -> Graph {
-        Graph {
-            map: HashMap::new(),
-        }
-    }
-
-    fn seen(&self, file_name: String) -> bool {
-        self.map.contains_key(&file_name)
-    }
-
-    fn push_local_dep(&mut self, file_name: String, dep: String) {
-        self._push(file_name, dep);
-    }
-    fn push_library_dep(&mut self, file_name: String, dep: String) {
-        self._push(file_name, dep);
-    }
-
-    fn _push(&mut self, file_name: String, dep: String) {
-        if self.map.contains_key(&file_name) {
-            let m = &mut self.map;
-            //let m = self.map.get(&file_name).unwrap();
-            if let Some(v) = m.get_mut(&file_name) {
-                v.push(dep);
-            }
-        } else {
-            let v = vec![dep];
-            self.map.insert(file_name.clone(), v);
-        }
-    }
-}
+mod graph;
 
 struct Context<'a> {
     graph: &'a mut Graph,
