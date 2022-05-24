@@ -51,11 +51,18 @@ impl Graph {
     }
 }
 
+struct Context<'a> {
+    graph: &'a mut Graph,
+    entry_file: &'a str,
+    root_dir: &'a str,
+}
+
+
 fn parse(
+    ctx: &mut Context,
     file_name: &str,
     parser: &mut Parser<Lexer<StringInput>>,
-    handler: Handler,
-    graph: &mut Graph,
+    handler: Handler
 ) {
     let program = parser
         .parse_program()
@@ -65,16 +72,16 @@ fn parse(
         })
         .expect("failed to parser module");
 
-    process_program(file_name, &program, graph);
+    process_program(ctx, file_name, &program);
 }
 
-fn process_program(file_name: &str, program: &Program, graph: &mut Graph) {
+fn process_program(ctx: &mut Context, file_name: &str, program: &Program) {
     if program.is_module() {
-        process_module(file_name, program.as_module(), graph);
+        process_module(ctx, file_name, program.as_module());
     }
 }
 
-fn process_module(file_name: &str, module: Option<&Module>, graph: &mut Graph) {
+fn process_module(ctx: &mut Context, file_name: &str, module: Option<&Module>) {
     let body = &module.expect("Unable to unwrap").body;
 
     for item in body {
@@ -84,36 +91,36 @@ fn process_module(file_name: &str, module: Option<&Module>, graph: &mut Graph) {
         }
         */
         if item.is_module_decl() {
-            visit_module_decl(file_name, item.as_module_decl(), graph);
+            visit_module_decl(ctx, file_name, item.as_module_decl());
         }
     }
 }
 
-fn visit_module_decl(file_name: &str, module_decl: Option<&ModuleDecl>, graph: &mut Graph) {
+fn visit_module_decl(ctx: &mut Context, file_name: &str, module_decl: Option<&ModuleDecl>) {
     let decl = module_decl.expect("Unable to unwrap module decl");
 
     match decl {
         ModuleDecl::Import(_import_decl) => {
-            visit_import_decl(file_name, decl.as_import(), graph);
+            visit_import_decl(ctx, file_name, decl.as_import());
         }
         _ => {
         }
     }
 }
 
-fn visit_import_decl(file_name: &str, import_decl: Option<&ImportDecl>, graph: &mut Graph) {
+fn visit_import_decl(ctx: &mut Context, file_name: &str, import_decl: Option<&ImportDecl>) {
     let decl = import_decl.expect("Unable to unwrap import decl");
 
     let val = &decl.src.value;
 
-    println!("Visiting import {} {}", file_name, val);
+    let root_dir = ctx.root_dir;
 
-    let dir_name = Path::new(file_name).parent().unwrap();
+    println!("Visiting import {} {} {}", file_name, val, root_dir);
 
-    if Path::exists(&Path::new(&dir_name).join(val.to_string())) {
+    if Path::exists(&Path::new(&root_dir).join(val.to_string())) {
         // This isn't perfect but assume the index file is tsx
         println!("local ref exists {}", val);
-        let dir_path = &Path::new(&dir_name).join(val.to_string());
+        let dir_path = &Path::new(&root_dir).join(val.to_string());
         let mut index_path = dir_path.join("index.tsx");
 
         if !Path::exists(index_path.as_path()) {
@@ -131,14 +138,14 @@ fn visit_import_decl(file_name: &str, import_decl: Option<&ImportDecl>, graph: &
         }
 
         println!("index path {:?}", index_path.to_str());
-        graph.push_local_dep(String::from(index_path.to_str().unwrap()), val.to_string().clone());
-        parse_file(&index_path.to_str().unwrap(), graph);
+        ctx.graph.push_local_dep(String::from(index_path.to_str().unwrap()), val.to_string().clone());
+        parse_file(ctx, &index_path.to_str().unwrap());
     }
 
-    if Path::exists(&Path::new(&dir_name).join("..").join(val.to_string())) {
+    if Path::exists(&Path::new(&root_dir).join("..").join(val.to_string())) {
         // This isn't perfect but assume the index file is tsx
         println!("local ref dir in root exists {}", val);
-        let dir_path = &Path::new(&dir_name).join("..").join(val.to_string());
+        let dir_path = &Path::new(&root_dir).join("..").join(val.to_string());
         let mut index_path = dir_path.join("index.tsx");
 
         if !Path::exists(index_path.as_path()) {
@@ -155,36 +162,36 @@ fn visit_import_decl(file_name: &str, import_decl: Option<&ImportDecl>, graph: &
         }
 
         println!("index path {:?}", index_path.to_str());
-        graph.push_local_dep(String::from(file_name), val.to_string().clone());
-        parse_file(&index_path.to_str().unwrap(), graph);
+        ctx.graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(ctx, &index_path.to_str().unwrap());
     }
 
-    let js_path = &Path::new(&dir_name).join("..").join(format!("{}.js", val.to_string()));
+    let js_path = &Path::new(&root_dir).join(format!("{}.js", val.to_string()));
     if Path::exists(js_path) {
         println!("local ref file js in root exists {}", val);
-        graph.push_local_dep(String::from(file_name), val.to_string().clone());
-        parse_file(js_path.to_str().unwrap(), graph);
+        ctx.graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(ctx, js_path.to_str().unwrap());
     }
 
-    let ts_path = &Path::new(&dir_name).join("..").join(format!("{}.ts", val.to_string()));
+    let ts_path = &Path::new(&root_dir).join(format!("{}.ts", val.to_string()));
     if Path::exists(ts_path) {
         println!("local ref file ts in root exists {}", val);
-        graph.push_local_dep(String::from(file_name), val.to_string().clone());
-        parse_file(ts_path.to_str().unwrap(), graph);
+        ctx.graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(ctx, ts_path.to_str().unwrap());
     }
 
-    let tsx_path = &Path::new(&dir_name).join("..").join(format!("{}.tsx", val.to_string()));
+    let tsx_path = &Path::new(&root_dir).join(format!("{}.tsx", val.to_string()));
     if Path::exists(tsx_path) {
         println!("local ref file tsx in root exists {}", val);
-        graph.push_local_dep(String::from(file_name), val.to_string().clone());
-        parse_file(tsx_path.to_str().unwrap(), graph);
+        ctx.graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(ctx, tsx_path.to_str().unwrap());
     }
 
     if val.chars().next().unwrap() == '.' && val.contains(".js") {
-        graph.push_local_dep(String::from(file_name), val.to_string().clone());
-        parse_file(val, graph);
+        ctx.graph.push_local_dep(String::from(file_name), val.to_string().clone());
+        parse_file(ctx, val);
     } else {
-        graph.push_library_dep(String::from(file_name), val.to_string().clone());
+        ctx.graph.push_library_dep(String::from(file_name), val.to_string().clone());
     }
 }
 
@@ -203,8 +210,8 @@ fn visit_stmt(stmt: Option<&Stmt>) {
 }
 */
 
-fn parse_file(file_name: &str, graph: &mut Graph) {
-    if graph.seen(file_name.to_string()) {
+fn parse_file(ctx: &mut Context, file_name: &str) {
+    if ctx.graph.seen(file_name.to_string()) {
         println!("ALREADY SEEN {}", file_name);
         return
     }
@@ -216,6 +223,8 @@ fn parse_file(file_name: &str, graph: &mut Graph) {
     let full_path = canonicalize(pb).expect("Unable to convert path");
 
     println!("PARSE FILE {} {}", file_name, full_path.to_str().unwrap());
+
+    let root_dir = Path::new(file_name).parent().unwrap();
 
     // Real usage
     let fm = cm
@@ -242,7 +251,7 @@ fn parse_file(file_name: &str, graph: &mut Graph) {
         e.into_diagnostic(&handler).emit();
     }
 
-    parse(file_name, &mut parser, handler, graph);
+    parse(ctx, file_name, &mut parser, handler);
 }
 
 fn print_graph(graph: &Graph) {
@@ -261,9 +270,17 @@ fn main() {
 
     let mut graph = Graph::new();
 
-    println!("Building dependency graph, starting at {}...", args.entry);
+    let root_dir = Path::new(args.entry.as_str()).parent().unwrap();
 
-    parse_file(args.entry.as_str(), &mut graph);
+    let mut ctx = Context {
+        entry_file: args.entry.as_str(),
+        root_dir: root_dir.to_str().unwrap(),
+        graph: &mut graph
+    };
+
+    println!("Building dependency graph, starting at {}...", ctx.entry_file);
+
+    parse_file(&mut ctx, args.entry.as_str());
 
     print_graph(&graph);
 }
