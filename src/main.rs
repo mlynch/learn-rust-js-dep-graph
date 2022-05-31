@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 extern crate swc_common;
 extern crate swc_ecma_parser;
+use std::collections::HashMap;
 use std::fs::canonicalize;
 use std::path::{Path, PathBuf};
 use swc_common::sync::Lrc;
@@ -230,6 +231,35 @@ fn print_graph(graph: &Graph) {
     }
 }
 
+fn print_graph_stats(graph: &Graph) {
+    let mut count_map: HashMap<&String, i32> = HashMap::new();
+
+    for vec in graph.map.values() {
+        for dep in vec {
+            if let Some(count) = count_map.get(dep) {
+                count_map.insert(dep, count + 1);
+            } else {
+                count_map.insert(dep, 1);
+            }
+        }
+    }
+
+    let mut deps: Vec<&&String> = count_map.keys().collect();
+
+    deps.sort_by(|a, b| {
+        if let (Some(av), Some(bv)) = (count_map.get(*a), count_map.get(*b)) {
+            return bv.cmp(av);
+        }
+        return std::cmp::Ordering::Equal;
+    });
+
+    for dep in deps {
+        if let Some(count) = count_map.get(dep) {
+            println!("{}: {}", dep, count);
+        }
+    }
+}
+
 fn main() {
     let args = cli::get_args();
 
@@ -248,4 +278,6 @@ fn main() {
     parse_file(&mut ctx, args.entry.as_str());
 
     print_graph(&graph);
+
+    print_graph_stats(&graph);
 }
